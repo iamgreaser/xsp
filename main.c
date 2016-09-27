@@ -35,7 +35,7 @@ typedef struct XSP_ {
 	int32_t regs[32];
 	int32_t c0_regs[32];
 	int32_t rlo, rhi;
-	int32_t lsaddr, lsreg;
+	int32_t lsaddr, lsreg, lsop;
 	int32_t pc, pcdiff;
 	int32_t fault_cause, fault_pc;
 	int32_t seg7;
