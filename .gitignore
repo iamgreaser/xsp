@@ -1,0 +1,7 @@
+# output
+run
+
+# VIM
+.*.swp
+.*.swo
+
