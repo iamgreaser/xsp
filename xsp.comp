@@ -28,7 +28,7 @@ const bool DEBUG_FAULTS = false;
 const bool DEBUG_IFETCH = false;
 const bool DEBUG_STORES = false;
 const bool DEBUG_JR = false;
-const bool DEBUG_DMA = false;
+const bool DEBUG_DMA = true;
 const bool DEBUG_IRQ = false;
 const bool DEBUG_SPU = false;
 const bool DEBUG_GPU = false;
@@ -80,7 +80,6 @@ layout(binding = 2) uniform atomic_uint debug_ypos;
 
 uint tohexdigit(uint v)
 {
-	v &= 15U;
 	if(v <= 9) {
 		return 0x30 + v;
 	} else {
@@ -182,7 +181,7 @@ int mem_read32_direct(int addr)
 	if((addr>>19) == (0x1FC00000>>19)) {
 		return rom[(addr>>2)&0x0007FFFF];
 
-	} else if((addr>>21) == 0) {
+	} else if((addr>>23) == 0) {
 		return ram[(addr>>2)&0x001FFFFF];
 
 	} else if((addr>>10) == 0x1F800000>>10) {
@@ -232,14 +231,21 @@ int mem_read32_direct(int addr)
 			debug_draw_hex_u32(4, ypos, uint(addr));
 			debug_draw_hex_u32(4+8+1, ypos, uint(pc));
 		}
-		if((addr&0x78)==0x70) {
+		int chn = (addr>>4)&7;
+		if(chn == 7) {
 			if((addr&4) == 0) {
 				return dpcr;
 			} else {
 				return dicr;
 			}
+		} else {
+			switch((addr>>2)&3) {
+				case 0: return dx_madr[chn];
+				case 1: return dx_bcr[chn];
+				case 2: return dx_chcr[chn];
+				default: return 0;
+			}
 		}
-		return 0;
 
 	} else if((addr>>3) == (0x1F801070>>3)) {
 		// TODO: IRQ
@@ -340,7 +346,8 @@ void mem_write32_direct(int addr, int v, int mask)
 			debug_draw_hex_u32(4+8+1, ypos, uint(v));
 			debug_draw_hex_u32(4+8+1+8+1, ypos, uint(mask));
 		}
-		if((addr&0x78)==0x70) {
+		int chn = (addr>>4)&7;
+		if(chn == 7) {
 			if((addr&4) == 0) {
 				dpcr = v; 
 			} else {
@@ -355,6 +362,20 @@ void mem_write32_direct(int addr, int v, int mask)
 					i_stat |= 0x0008;
 					irq_update(pc);
 				}
+			}
+
+		} else {
+			switch((addr>>2)&3) {
+				case 0:
+					dx_madr[chn] = v&0x00FFFFFF;
+					break;
+				case 1:
+					dx_bcr[chn] = v;
+					break;
+				case 2:
+					dx_chcr[chn] = (v&0x71770703)
+						| (dx_chcr[chn]&0x00000000);
+					break;
 			}
 		}
 
@@ -1128,6 +1149,11 @@ void main()
 		// DMA
 		dicr = 0;
 		dpcr = 0x07654321;
+		for(int i = 0; i < 7; i++) {
+			dx_madr[i] = 0;
+			dx_bcr[i] = 0;
+			dx_chcr[i] = 0;
+		}
 
 		// Debug
 		clear_debug_vram();
