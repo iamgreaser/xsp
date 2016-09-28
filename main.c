@@ -45,7 +45,9 @@ typedef struct XSP_ {
 	int32_t dx_madr[8];
 	int32_t dx_bcr[8];
 	int32_t dx_chcr[8];
-	int32_t dpcr, dicr;
+	int32_t dx_len[8];
+	int32_t dx_xadr[8];
+	int32_t dpcr, dicr, dma_enabled;
 } XSP;
 
 uint8_t rom[512*1024];

@@ -28,11 +28,11 @@ const bool DEBUG_FAULTS = false;
 const bool DEBUG_IFETCH = false;
 const bool DEBUG_STORES = false;
 const bool DEBUG_JR = false;
-const bool DEBUG_DMA = true;
+const bool DEBUG_DMA = false;
 const bool DEBUG_IRQ = false;
-const bool DEBUG_SPU = false;
+const bool DEBUG_SPU = true;
 const bool DEBUG_GPU = false;
-const bool DEBUG_TIMER = true;
+const bool DEBUG_TIMER = false;
 
 const int SCANLINE_COUNT = 10;
 //const int CYCLES_PER_SCANLINE = 2168;
@@ -51,7 +51,7 @@ const int CAUSE_Ov   = 0x0C;
 
 layout(binding = 0, rgba8ui) restrict writeonly uniform uimage2D otex0;
 layout(binding = 1, r8ui) restrict readonly uniform uimage2D font0;
-layout(std430, binding = 1) buffer psxStorage {
+layout(std430, binding = 1) restrict buffer psxStorage {
 	uint debug_vram[64*32*2];
 	int xcomms;
 	int ram[2048*256];
@@ -73,7 +73,9 @@ layout(std430, binding = 1) buffer psxStorage {
 	int dx_madr[8];
 	int dx_bcr[8];
 	int dx_chcr[8];
-	int dpcr, dicr;
+	int dx_len[8];
+	int dx_xadr[8];
+	int dpcr, dicr, dma_enabled;
 };
 
 layout(binding = 2) uniform atomic_uint debug_ypos;
@@ -173,6 +175,22 @@ void irq_update(int op_pc)
 	if((c0_regs[0x0C] & 1) != 0 && (c0_regs[0x0D] & c0_regs[0x0C] & 0xFF00) != 0) {
 		fault_set(CAUSE_Int, op_pc);
 	}
+}
+
+void irq_update_dma(int op_pc)
+{
+	//
+	if((dicr&0x8000)!=0 ||
+			((dicr&(1<<23))!=0
+			&& (dicr&0x7F000000)!=0)) {
+
+		dicr |= 0x80000000;
+		i_stat |= 0x0008;
+		irq_update(op_pc);
+	} else {
+		dicr &= ~0x80000000;
+	}
+
 }
 
 int mem_read32_direct(int addr)
@@ -325,7 +343,7 @@ void mem_write32_direct(int addr, int v, int mask)
 
 	} else if((addr>>9) == (0x1F801C00>>9)) {
 		// TODO: SPU
-		if(DEBUG_SPU) {
+		if(DEBUG_SPU && addr != 0x1F801DA8) {
 			int ypos = debug_get_line();
 			debug_vram[ypos*64+0] = 0x53;
 			debug_vram[ypos*64+1] = 0x50;
@@ -354,14 +372,7 @@ void mem_write32_direct(int addr, int v, int mask)
 				dicr &= ~(v&0x7F000000);
 				dicr &= 0x7F000000;
 				dicr |= v&0x00FF803F;
-				if((dicr&0x8000)!=0 ||
-						((dicr&(1<<23))!=0
-						&& (dicr&0x7F000000)!=0)) {
-
-					dicr |= 0x80000000;
-					i_stat |= 0x0008;
-					irq_update(pc);
-				}
+				irq_update_dma(pc);
 			}
 
 		} else {
@@ -375,6 +386,14 @@ void mem_write32_direct(int addr, int v, int mask)
 				case 2:
 					dx_chcr[chn] = (v&0x71770703)
 						| (dx_chcr[chn]&0x00000000);
+					if((dx_chcr[chn]&(1<<24)) != 0) {
+						dma_enabled |=  (8<<(chn*4));
+						dx_len[chn] = dx_bcr[chn];
+						dx_xadr[chn] = dx_madr[chn];
+						dx_chcr[chn] &= ~(1<<28);
+					} else {
+						dma_enabled &= ~(8<<(chn*4));
+					}
 					break;
 			}
 		}
@@ -1120,6 +1139,28 @@ void mips_run()
 			xcomms |= 2;
 			break;
 		}
+		if((dpcr&dma_enabled) != 0) {
+			int m = dpcr&dma_enabled;
+
+			// DMA6: Order table generator
+			if((m&(8<<(4*6))) != 0) {
+				int l = dx_len[6]&0xFFFF;
+				dx_len[6] = (dx_len[6]-1)&0xFFFF;
+				if(l == 1) {
+					ram[dx_xadr[6]>>2] = 0x00FFFFFF;
+					dma_enabled &= ~(8<<(4*6));
+					dx_chcr[6] &= ~(1<<24);
+					if((dicr&(0x00010000<<6)) != 0) {
+						dicr |= (0x01000000<<6);
+						irq_update_dma(pc);
+					}
+				} else {
+					ram[dx_xadr[6]>>2] = (dx_xadr[6]&0x00FFFFFF)-4;
+				}
+				dx_xadr[6] -= 4;
+				continue;
+			}
+		}
 		mips_decode_op();
 	}
 }
@@ -1149,6 +1190,7 @@ void main()
 		// DMA
 		dicr = 0;
 		dpcr = 0x07654321;
+		dma_enabled = 0;
 		for(int i = 0; i < 7; i++) {
 			dx_madr[i] = 0;
 			dx_bcr[i] = 0;
