@@ -34,9 +34,11 @@ const bool DEBUG_SPU = true;
 const bool DEBUG_GPU = false;
 const bool DEBUG_TIMER = false;
 
-const int SCANLINE_COUNT = 10;
+//const int SCANLINE_COUNT = 10;
+const int SCANLINE_COUNT = 314;
 //const int CYCLES_PER_SCANLINE = 2168;
-const int CYCLES_PER_SCANLINE = 271; // divided by 8
+//const int CYCLES_PER_SCANLINE = 271; // divided by 8
+const int CYCLES_PER_SCANLINE = 16;
 
 const int CAUSE_Int  = 0x00;
 const int CAUSE_AdEL = 0x04;
@@ -57,7 +59,7 @@ layout(std430, binding = 1) restrict buffer psxStorage {
 	int ram[2048*256];
 	int vram[1024*256];
 	int rom[512*256];
-	int sram[512*256];
+	int sram[512*512];
 	int scratch[1*256];
 	int gpu_fifo[16];
 	int regs[32];
@@ -76,6 +78,7 @@ layout(std430, binding = 1) restrict buffer psxStorage {
 	int dx_len[8];
 	int dx_xadr[8];
 	int dpcr, dicr, dma_enabled;
+	int spu_wptr;
 };
 
 layout(binding = 2) uniform atomic_uint debug_ypos;
@@ -196,11 +199,11 @@ void irq_update_dma(int op_pc)
 int mem_read32_direct(int addr)
 {
 	addr &= 0x1FFFFFFF;
-	if((addr>>19) == (0x1FC00000>>19)) {
-		return rom[(addr>>2)&0x0007FFFF];
-
-	} else if((addr>>23) == 0) {
+	if((addr>>23) == 0) {
 		return ram[(addr>>2)&0x001FFFFF];
+
+	} else if((addr>>19) == (0x1FC00000>>19)) {
+		return rom[(addr>>2)&0x0007FFFF];
 
 	} else if((addr>>10) == 0x1F800000>>10) {
 		int pa = (addr>>2)&((1<<10)-1);
@@ -229,7 +232,7 @@ int mem_read32_direct(int addr)
 
 	} else if((addr>>9) == (0x1F801C00>>9)) {
 		// TODO: SPU
-		if(DEBUG_SPU) {
+		if(false && DEBUG_SPU) {
 			int ypos = debug_get_line();
 			debug_vram[ypos*64+0] = 0x53;
 			debug_vram[ypos*64+1] = 0x50;
@@ -343,7 +346,7 @@ void mem_write32_direct(int addr, int v, int mask)
 
 	} else if((addr>>9) == (0x1F801C00>>9)) {
 		// TODO: SPU
-		if(DEBUG_SPU && addr != 0x1F801DA8) {
+		if(DEBUG_SPU && addr != 0x1F801DA8 && addr != 0x1F801DA6) {
 			int ypos = debug_get_line();
 			debug_vram[ypos*64+0] = 0x53;
 			debug_vram[ypos*64+1] = 0x50;
@@ -351,6 +354,17 @@ void mem_write32_direct(int addr, int v, int mask)
 			debug_draw_hex_u32(4, ypos, uint(addr));
 			debug_draw_hex_u32(4+8+1, ypos, uint(v));
 			debug_draw_hex_u32(4+8+1+8+1, ypos, uint(mask));
+		}
+		if(addr == 0x1F801DA6) {
+			v = (v>>16)&0xFFFF;
+			spu_wptr = v<<2;
+			spu_wptr &= 0x3FFFF;
+		} else if(addr == 0x1F801DA8) {
+			v = (v>>0)&0xFFFF;
+			spu_wptr &= 0x3FFFF;
+			sram[spu_wptr] = v;
+			spu_wptr++;
+			spu_wptr &= 0x1FFFF;
 		}
 
 	} else if((addr>>7) == (0x1F801080>>7)) {
@@ -1196,6 +1210,9 @@ void main()
 			dx_bcr[i] = 0;
 			dx_chcr[i] = 0;
 		}
+
+		// SPU
+		spu_wptr = 0;
 
 		// Debug
 		clear_debug_vram();

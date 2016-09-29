@@ -29,7 +29,7 @@ typedef struct XSP_ {
 	int32_t ram[2048*256];
 	int32_t vram[1024*256];
 	int32_t rom[512*256];
-	int32_t sram[512*256];
+	int32_t sram[512*512];
 	int32_t scratch[1*256];
 	int32_t gpu_fifo[16];
 	int32_t regs[32];
@@ -48,6 +48,7 @@ typedef struct XSP_ {
 	int32_t dx_len[8];
 	int32_t dx_xadr[8];
 	int32_t dpcr, dicr, dma_enabled;
+	int32_t spu_wptr;
 } XSP;
 
 uint8_t rom[512*1024];
